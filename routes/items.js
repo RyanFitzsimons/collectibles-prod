@@ -9,6 +9,7 @@ const dbAll = promisify(db.all.bind(db));
 const dbRun = promisify(db.run.bind(db));
 const dbGet = promisify(db.get.bind(db));
 
+
 router.get('/items', async (req, res) => {
   try {
     const rows = await dbAll('SELECT * FROM inventory WHERE status = "In Stock"');
@@ -20,6 +21,7 @@ router.get('/items', async (req, res) => {
 });
 
 router.post('/items', async (req, res) => {
+  console.log('POST /items received:', req.body);
   const item = req.body;
   try {
     const result = await dbRun(
