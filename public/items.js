@@ -1,33 +1,86 @@
 // collectibles-prod/public/items.js
 import { apiFetch, showAlert, getFormData } from './utils.js';
 
-const categoryAttributes = {
-  "Pokémon": { platform: "set", region: "series" },
-  "Video Games": { platform: "platform", region: "region" },
-  "Comics": { platform: "title", region: "issue" },
-  "Football Jerseys": { platform: "team", region: "season" },
-  "GAA Jerseys": { platform: "county", region: "year" },
-  "Coins": { platform: "denomination", region: "year" },
-  "Video Game Consoles": { platform: "model", region: "region" },
-  "Electronics": { platform: "type", region: "brand" },
-  "Other TCGs": { platform: "game", region: "set" },
-  "Sports Cards": { platform: "sport", region: "player" }
-};
+let categoryRules = {};
 
-export function initItems() {
+async function fetchCategoryRules() {
+  try {
+    categoryRules = await apiFetch('/categories');
+  } catch (err) {
+    console.error('Failed to fetch category rules:', err);
+    showAlert('Error', 'Could not load category rules', 'error');
+  }
+}
+
+function updateFormFields(category) {
+  const rules = categoryRules[category] || { attributes: { required: [], optional: [] }, condition: { required: ['type'] } };
+  const attributesContainer = document.getElementById('attributes-container');
+  attributesContainer.innerHTML = '';
+
+  // Required attributes
+  rules.attributes.required.forEach(attr => {
+    const div = document.createElement('div');
+    div.className = 'col-md-6';
+    div.innerHTML = `
+      <label>${attr.charAt(0).toUpperCase() + attr.slice(1)}: 
+        <input type="text" class="form-control" name="${attr}" required>
+      </label>
+    `;
+    attributesContainer.appendChild(div);
+  });
+
+  // Optional attributes
+  rules.attributes.optional.forEach(attr => {
+    const div = document.createElement('div');
+    div.className = 'col-md-6';
+    div.innerHTML = `
+      <label>${attr.charAt(0).toUpperCase() + attr.slice(1)}: 
+        <input type="text" class="form-control" name="${attr}">
+      </label>
+    `;
+    attributesContainer.appendChild(div);
+  });
+
+  // Condition (assuming 'type' is the only required field)
+  const conditionDiv = document.getElementById('condition-container');
+  conditionDiv.innerHTML = `
+    <label>Condition: 
+      <input type="text" class="form-control" name="condition" required>
+    </label>
+  `;
+}
+
+export async function initItems() {
+  await fetchCategoryRules(); // Load rules first
+
+  const categorySelect = document.getElementById('category-select');
+  categorySelect.addEventListener('change', (e) => updateFormFields(e.target.value));
+  updateFormFields(categorySelect.value); // Initial render
+
   document.getElementById('item-form').addEventListener('submit', async (e) => {
     e.preventDefault();
     const item = getFormData(e.target);
-    const attrMap = categoryAttributes[item.category];
-    item.attributes = { [attrMap.platform]: item.platform, [attrMap.region]: item.region };
+    const rules = categoryRules[item.category] || { attributes: { required: [], optional: [] } };
+    const allAttributes = [...rules.attributes.required, ...rules.attributes.optional];
+
+    item.attributes = {};
+    allAttributes.forEach(attr => {
+      if (item[attr]) {
+        item.attributes[attr] = item[attr];
+        delete item[attr];
+      }
+    });
+
     item.condition_history = [{ type: item.condition, date: new Date().toISOString() }];
-    delete item.platform;
-    delete item.region;
+    item.value = parseFloat(item.value);
+    item.cost_price = parseFloat(item.cost_price);
+    item.input_vat = parseFloat(item.input_vat) || 0;
 
     try {
       const data = await apiFetch('/items', { method: 'POST', body: JSON.stringify(item) });
       showAlert('Success', `Added item: ${data.id}`, 'success');
       e.target.reset();
+      updateFormFields(categorySelect.value);
     } catch (err) {
       showAlert('Error', err.message, 'error');
     }
@@ -47,8 +100,17 @@ export function initItems() {
   document.getElementById('edit-item-form').addEventListener('submit', async (e) => {
     e.preventDefault();
     const item = getFormData(e.target);
-    const attrMap = categoryAttributes[item.category];
-    item.attributes = { [attrMap.platform]: item.platform, [attrMap.region]: item.region };
+    const rules = categoryRules[item.category] || { attributes: { required: [], optional: [] } };
+    const allAttributes = [...rules.attributes.required, ...rules.attributes.optional];
+
+    item.attributes = {};
+    allAttributes.forEach(attr => {
+      if (item[attr]) {
+        item.attributes[attr] = item[attr];
+        delete item[attr];
+      }
+    });
+
     item.value = parseFloat(item.value);
     item.cost_price = parseFloat(item.cost_price);
     item.input_vat = parseFloat(item.input_vat) || 0;
@@ -58,8 +120,6 @@ export function initItems() {
     if (item.condition !== lastCondition) {
       item.condition_history.push({ type: item.condition, date: new Date().toISOString() });
     }
-    delete item.platform;
-    delete item.region;
 
     try {
       const data = await apiFetch(`/items/${item.id}`, { method: 'PUT', body: JSON.stringify(item) });
@@ -81,7 +141,9 @@ export async function fetchItems() {
     data.forEach((row, index) => {
       const attributes = JSON.parse(row.attributes || '{}');
       const conditionHistory = JSON.parse(row.condition_history || '[]');
-      const attrMap = categoryAttributes[row.category] || { platform: "platform", region: "region" };
+      const rules = categoryRules[row.category] || { attributes: { required: [], optional: [] } };
+      const attrKeys = [...rules.attributes.required, ...rules.attributes.optional];
+      const attrDisplay = attrKeys.map(key => `${key}: ${attributes[key] || 'N/A'}`).join(', ');
       const tr = document.createElement('tr');
       tr.dataset.item = JSON.stringify(row);
       tr.innerHTML = `
@@ -90,8 +152,7 @@ export async function fetchItems() {
         <td>${row.category}</td>
         <td>${row.value.toFixed(2)}</td>
         <td>${row.cost_price.toFixed(2)}</td>
-        <td>${attributes[attrMap.platform] || 'N/A'}</td>
-        <td>${attributes[attrMap.region] || 'N/A'}</td>
+        <td>${attrDisplay}</td>
         <td>${row.condition || 'N/A'}</td>
         <td>${conditionHistory.map(h => `${h.type} (${h.date.slice(0, 10)})`).join(', ') || 'N/A'}</td>
         <td>${(row.input_vat || 0).toFixed(2)}</td>
@@ -108,9 +169,7 @@ export async function fetchItems() {
         const row = JSON.parse(btn.closest('tr').dataset.item);
         const attributes = JSON.parse(row.attributes || '{}');
         const conditionHistory = JSON.parse(row.condition_history || '[]');
-        const attrMap = categoryAttributes[row.category] || { platform: "platform", region: "region" };
-        editItem(row.id, row.name, row.category, row.value, row.cost_price, attributes[attrMap.platform] || '',
-          attributes[attrMap.region] || '', row.condition || '', JSON.stringify(conditionHistory), row.input_vat || 0);
+        editItem(row.id, row.name, row.category, row.value, row.cost_price, attributes, row.condition || '', JSON.stringify(conditionHistory), row.input_vat || 0);
       });
     });
   } catch (err) {
@@ -118,18 +177,24 @@ export async function fetchItems() {
   }
 }
 
-function editItem(id, name, category, value, cost_price, platform, region, condition, condition_history, input_vat) {
+function editItem(id, name, category, value, cost_price, attributes, condition, condition_history, input_vat) {
   const form = document.getElementById('edit-item-form');
   form.id.value = id;
   form.name.value = name;
   form.category.value = category;
   form.value.value = value;
   form.cost_price.value = cost_price;
-  form.platform.value = platform;
-  form.region.value = region;
   form.condition.value = condition;
   form.input_vat.value = input_vat;
   form.dataset.conditionHistory = condition_history;
+
+  const rules = categoryRules[category] || { attributes: { required: [], optional: [] } };
+  const allAttributes = [...rules.attributes.required, ...rules.attributes.optional];
+  allAttributes.forEach(attr => {
+    const input = form.querySelector(`input[name="${attr}"]`);
+    if (input) input.value = attributes[attr] || '';
+  });
+
   document.getElementById('edit-form-container').style.display = 'block';
 }
 
@@ -141,7 +206,7 @@ export async function deleteItem(id) {
   if (result.isConfirmed) {
     try {
       await apiFetch(`/items/${id}`, { method: 'DELETE' });
-      showAlert('Deleted', `Item ${id} has been deleted`, 'success');
+      showAlert('Success', `Item ${id} has been deleted`, 'success');
       fetchItems();
     } catch (err) {
       showAlert('Error', err.message, 'error');

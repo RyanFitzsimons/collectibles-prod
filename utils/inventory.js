@@ -77,4 +77,4 @@ function validateInventoryItem(item) {
   return true;
 }
 
-module.exports = { validateInventoryItem };
+module.exports = { validateInventoryItem, validationRules };
